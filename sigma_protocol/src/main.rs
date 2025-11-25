@@ -1,7 +1,19 @@
-use axum::{Router, extract::State, routing::get};
-use clap::Parser;
+use axum::{
+    Router,
+    extract::State,
+    http::StatusCode,
+    response::sse::{Event, KeepAlive, Sse},
+    response::{Html, IntoResponse},
+    routing::{get, post},
+};
+use futures_core::Stream;
 use std::net::SocketAddr;
+use tokio::sync::broadcast;
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::{BroadcastStream, errors::BroadcastStreamRecvError};
+use tracing::{info, warn};
 
+use clap::Parser;
 mod config;
 use config::Config;
 
@@ -18,11 +30,16 @@ struct Args {
 struct AppState {
     config: Config,
     http_client: reqwest::Client,
+    tx: broadcast::Sender<String>,
 }
 
 #[tokio::main]
 async fn main() {
     let cli = Args::parse();
+    tracing_subscriber::fmt::init();
+
+    // Буфер последних 100 сообщений — новые клиенты получат их историю!
+    let (tx, _) = broadcast::channel::<String>(100);
 
     let state = AppState {
         config: match Config::load(&cli.config_path) {
@@ -33,6 +50,7 @@ async fn main() {
             }
         },
         http_client: reqwest::Client::new(),
+        tx,
     };
 
     let addr: SocketAddr = state.config.get_address().parse().unwrap();
@@ -41,36 +59,101 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     let app = Router::new()
         .route("/", get(root_handler))
-        .route("/fetch", get(fetch_handler))
+        .route("/start", post(start_handler))
+        .route("/logs", get(logs_handler))
         .with_state(state);
+    // .nest_service("/html", ServeDir::new("html"));
 
     if let Err(e) = axum::serve(listener, app).await {
         eprintln!("Server error: {}", e);
         std::process::exit(1);
     }
+
+    info!("Listening on {}", addr);
 }
 
-async fn root_handler(State(state): State<AppState>) -> Result<(), axum::http::StatusCode> {
-    println!("Hello it`s {}", state.config.get_name());
-    let result = fetch_handler(State(state.clone())).await?;
-    Ok(())
+async fn root_handler() -> Html<&'static str> {
+    Html(include_str!("../html/index.html"))
+}
+async fn start_handler(State(state): State<AppState>) -> StatusCode {
+    info!("Получен запрос на запуск задачи");
+
+    // Клонируем sender — можно много раз
+    let tx = state.tx.clone();
+
+    tokio::spawn(async move {
+        simulate_long_task(tx).await;
+    });
+
+    StatusCode::ACCEPTED
 }
 
-async fn fetch_handler(State(state): State<AppState>) -> Result<String, axum::http::StatusCode> {
-    let response = state
-        .http_client
-        .get(format!(
-            "http://{}",
-            state.config.get_second_server_address()
-        ))
-        .send()
-        .await
-        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+async fn logs_handler(
+    State(state): State<AppState>,
+) -> Sse<impl futures_core::Stream<Item = Result<Event, axum::Error>>> {
+    let stream = BroadcastStream::new(state.tx.subscribe()).map(|res| match res {
+        Ok(msg) => Ok(Event::default().data(msg)),
+        Err(BroadcastStreamRecvError::Lagged(skipped)) => {
+            Ok(Event::default().data(format!("⚠️ Пропущено {} сообщений", skipped)))
+        }
+    });
 
-    let text = response
-        .text()
-        .await
-        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok(text)
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
+
+use std::time::Duration;
+
+async fn simulate_long_task(tx: broadcast::Sender<String>) {
+    // Отправка — игнорируем ошибки (если никто не слушает)
+    let _ = tx.send("🔧 Задача запущена".to_string());
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let steps = [
+        "📥 Получение данных...",
+        "⚙️ Обработка этап 1...",
+        "⚙️ Обработка этап 2...",
+        "💾 Сохранение результатов...",
+        "✅ Задача завершена успешно!",
+    ];
+
+    for &step in &steps {
+        let _ = tx.send(step.to_string());
+        tokio::time::sleep(Duration::from_millis(800)).await;
+    }
+
+    // Финальное сообщение
+    let _ = tx.send("🔚 Работа завершена".to_string());
+}
+
+async fn p_handler(State(state): State<AppState>) -> Result<&'static str, axum::http::StatusCode> {
+    println!(
+        "{} Hello it`s {}",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+        state.config.get_name()
+    );
+
+    if (true) {
+        return Ok("Good");
+    } else {
+        return Ok("Reject");
+    }
+}
+
+// async fn fetch_handler(State(state): State<AppState>) -> Result<String, axum::http::StatusCode> {
+//     let response = state
+//         .http_client
+//         .get(format!(
+//             "http://{}",
+//             state.config.get_second_server_address()
+//         ))
+//         .send()
+//         .await
+//         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+
+//     let text = match response.text().await {
+//         Ok(text) => text,
+//         Err(_) => return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+//     };
+
+//     Ok(text)
+// }
