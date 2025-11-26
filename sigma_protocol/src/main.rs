@@ -6,7 +6,7 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
     routing::{get, post},
 };
-use num_bigint::BigUint;
+use num_bigint::{BigUint, ToBigInt};
 use std::net::SocketAddr;
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
@@ -114,8 +114,8 @@ async fn start_handler(State(state): State<AppState>) -> StatusCode {
     let tx = state.tx.clone();
 
     tokio::spawn(async move {
-        // start_prove();
-        simulate_long_task(tx).await;
+        start_proof(state, tx);
+        // simulate_long_task(tx).await;
     });
 
     StatusCode::ACCEPTED
@@ -134,50 +134,70 @@ async fn logs_handler(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-use std::time::Duration;
+//use std::time::Duration;
 
-async fn simulate_long_task(tx: broadcast::Sender<String>) {
-    // Отправка — игнорируем ошибки (если никто не слушает)
-    let _ = tx.send("🔧 Задача запущена".to_string());
-    tokio::time::sleep(Duration::from_millis(500)).await;
+// async fn simulate_long_task(tx: broadcast::Sender<String>) {
+//     // Отправка — игнорируем ошибки (если никто не слушает)
+//     let _ = tx.send("🔧 Задача запущена".to_string());
+//     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    let steps = [
-        "📥 Получение данных...",
-        "⚙️ Обработка этап 1...",
-        "⚙️ Обработка этап 2...",
-        "💾 Сохранение результатов...",
-        "✅ Задача завершена успешно!",
-    ];
+//     let steps = [
+//         "📥 Получение данных...",
+//         "⚙️ Обработка этап 1...",
+//         "⚙️ Обработка этап 2...",
+//         "💾 Сохранение результатов...",
+//         "✅ Задача завершена успешно!",
+//     ];
 
-    for &step in &steps {
-        let _ = tx.send(step.to_string());
-        tokio::time::sleep(Duration::from_millis(800)).await;
-    }
+//     for &step in &steps {
+//         let _ = tx.send(step.to_string());
+//         tokio::time::sleep(Duration::from_millis(800)).await;
+//     }
 
-    // Финальное сообщение
-    let _ = tx.send("🔚 Работа завершена".to_string());
+//     // Финальное сообщение
+//     let _ = tx.send("🔚 Работа завершена".to_string());
+// }
+
+async fn start_proof(appstate: AppState, tx: broadcast::Sender<String>) {
+    let c = get_challenge();
+
+    let q = appstate.q.clone();
+    let g = appstate.g.clone();
+    let h = appstate.h.clone();
+    let a = appstate.secret_key.alpha.clone();
+    let b = appstate.secret_key.beta.clone();
+
+    let at = key_gen::random_biguint_mod(&q).await;
+    let bt = key_gen::random_biguint_mod(&q).await;
+    let ut = (math::mod_pow_big(&g, &at.to_bigint().unwrap(), &q).unwrap()
+        * math::mod_pow_big(&h, &bt.to_bigint().unwrap(), &q).unwrap())
+        % &q;
+
+    let az = (at + a * &c) % &q;
+    let bz = (bt + b * &c) % &q;
+
+    tx.send("P успешно вычислил и отправил значения az, bz, ut".to_string());
+    send_proof(az, bz, ut, c, appstate.clone(), tx).await;
 }
 
-//async fn start_prove(appstate: AppState)
-// {
-//      let c = get_challenge().await;
-//
-//      вычисляешь
-//
-//      send_proof(c, proof).await;
-//
-// }
-//
-// async fn send_proof(c: Challenge, proof: Proof) {
-//
-//      вычисление
-//
-//      if true {
-//          let _ = tx.send("✅ Задача завершена успешно!".to_string());
-//      } else {
-//          let _ = tx.send("❌ Задача завершена с ошибкой!".to_string());
-//      }
-// }
+fn get_challenge() -> BigUint {
+    todo!()
+}
+
+async fn send_proof(
+    az: BigUint,
+    bz: BigUint,
+    ut: BigUint,
+    c: BigUint,
+    appstate: AppState,
+    tx: broadcast::Sender<String>,
+) {
+    if true {
+        let _ = tx.send("✅ Задача завершена успешно!".to_string());
+    } else {
+        let _ = tx.send("❌ Задача завершена с ошибкой!".to_string());
+    }
+}
 
 async fn p_handler(State(state): State<AppState>) -> Result<&'static str, axum::http::StatusCode> {
     println!(
