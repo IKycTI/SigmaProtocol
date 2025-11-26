@@ -2,11 +2,10 @@ use axum::{
     Router,
     extract::State,
     http::StatusCode,
+    response::Html,
     response::sse::{Event, KeepAlive, Sse},
-    response::{Html, IntoResponse},
     routing::{get, post},
 };
-use futures_core::Stream;
 use std::net::SocketAddr;
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
@@ -29,7 +28,6 @@ struct Args {
 #[derive(Debug, Clone)]
 struct AppState {
     config: Config,
-    http_client: reqwest::Client,
     tx: broadcast::Sender<String>,
 }
 
@@ -38,7 +36,6 @@ async fn main() {
     let cli = Args::parse();
     tracing_subscriber::fmt::init();
 
-    // Буфер последних 100 сообщений — новые клиенты получат их историю!
     let (tx, _) = broadcast::channel::<String>(100);
 
     let state = AppState {
@@ -49,7 +46,6 @@ async fn main() {
                 std::process::exit(1);
             }
         },
-        http_client: reqwest::Client::new(),
         tx,
     };
 
@@ -62,7 +58,6 @@ async fn main() {
         .route("/start", post(start_handler))
         .route("/logs", get(logs_handler))
         .with_state(state);
-    // .nest_service("/html", ServeDir::new("html"));
 
     if let Err(e) = axum::serve(listener, app).await {
         eprintln!("Server error: {}", e);
@@ -75,6 +70,7 @@ async fn main() {
 async fn root_handler() -> Html<&'static str> {
     Html(include_str!("../html/index.html"))
 }
+
 async fn start_handler(State(state): State<AppState>) -> StatusCode {
     info!("Получен запрос на запуск задачи");
 
@@ -82,6 +78,7 @@ async fn start_handler(State(state): State<AppState>) -> StatusCode {
     let tx = state.tx.clone();
 
     tokio::spawn(async move {
+        // start_prove();
         simulate_long_task(tx).await;
     });
 
@@ -125,6 +122,27 @@ async fn simulate_long_task(tx: broadcast::Sender<String>) {
     let _ = tx.send("🔚 Работа завершена".to_string());
 }
 
+//async fn start_prove(appstate: AppState)
+// {
+//      let c = get_challenge().await;
+//
+//      вычисляешь
+//
+//      send_proof(c, proof).await;
+//
+// }
+//
+// async fn send_proof(c: Challenge, proof: Proof) {
+//
+//      вычисление
+//
+//      if true {
+//          let _ = tx.send("✅ Задача завершена успешно!".to_string());
+//      } else {
+//          let _ = tx.send("❌ Задача завершена с ошибкой!".to_string());
+//      }
+// }
+
 async fn p_handler(State(state): State<AppState>) -> Result<&'static str, axum::http::StatusCode> {
     println!(
         "{} Hello it`s {}",
@@ -132,7 +150,7 @@ async fn p_handler(State(state): State<AppState>) -> Result<&'static str, axum::
         state.config.get_name()
     );
 
-    if (true) {
+    if true {
         return Ok("Good");
     } else {
         return Ok("Reject");

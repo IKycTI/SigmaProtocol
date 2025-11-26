@@ -1,4 +1,3 @@
-use crate::key::{Key, PairKey};
 use num_bigint::{BigInt, BigUint, RandBigInt, ToBigInt, ToBigUint};
 use num_traits::{FromPrimitive, One, Zero};
 
@@ -6,35 +5,35 @@ use crate::math;
 
 const RANDOM_SIZE: u64 = 64;
 
-pub fn generate_key() -> PairKey {
-    let p = gen_random_prime();
-    let mut q = gen_random_prime();
+// pub fn generate_key() -> PairKey {
+//     let p = gen_random_prime();
+//     let mut q = gen_random_prime();
 
-    if p == q {
-        q = gen_random_prime();
-    }
+//     if p == q {
+//         q = gen_random_prime();
+//     }
 
-    let phi = (&p - BigUint::one()) * (&q - BigUint::one());
+//     let phi = (&p - BigUint::one()) * (&q - BigUint::one());
 
-    let mut num = BigUint::from_u8(2).unwrap();
-    let e = loop {
-        if math::gcd_big(&num, &phi) == BigUint::one() {
-            break num;
-        } else {
-            num += BigUint::one();
-        }
-    };
-    let d = match math::modular_inverse_euclidean(&e, &phi) {
-        Some(d) => d,
-        None => panic!("Failed to find modular inverse"),
-    };
-    let n = p * q;
-    let private_key = Key::new(n.clone(), d);
+//     let mut num = BigUint::from_u8(2).unwrap();
+//     let e = loop {
+//         if math::gcd_big(&num, &phi) == BigUint::one() {
+//             break num;
+//         } else {
+//             num += BigUint::one();
+//         }
+//     };
+//     let d = match math::modular_inverse_euclidean(&e, &phi) {
+//         Some(d) => d,
+//         None => panic!("Failed to find modular inverse"),
+//     };
+//     let n = p * q;
+//     let private_key = Key::new(n.clone(), d);
 
-    let public_key = Key::new(n, e);
+//     let public_key = Key::new(n, e);
 
-    PairKey::new(private_key, public_key)
-}
+//     PairKey::new(private_key, public_key)
+// }
 
 //Генерация случайного простого числа
 pub fn gen_random_prime() -> BigUint {
