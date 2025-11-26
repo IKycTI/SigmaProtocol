@@ -6,6 +6,7 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
     routing::{get, post},
 };
+use num_bigint::BigUint;
 use std::net::SocketAddr;
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
@@ -13,7 +14,11 @@ use tokio_stream::wrappers::{BroadcastStream, errors::BroadcastStreamRecvError};
 use tracing::{info, warn};
 
 use clap::Parser;
+
 mod config;
+mod key_gen;
+mod math;
+
 use config::Config;
 
 // const PATH: &str = "config_p.json";
@@ -28,7 +33,23 @@ struct Args {
 #[derive(Debug, Clone)]
 struct AppState {
     config: Config,
+    q: BigUint,
+    g: BigUint,
+    h: BigUint,
+    secret_key: Key,
     tx: broadcast::Sender<String>,
+}
+
+#[derive(Debug, Clone)]
+struct Key {
+    alpha: BigUint,
+    beta: BigUint,
+}
+
+impl Key {
+    fn new(alpha: BigUint, beta: BigUint) -> Self {
+        Key { alpha, beta }
+    }
 }
 
 #[tokio::main]
@@ -38,6 +59,8 @@ async fn main() {
 
     let (tx, _) = broadcast::channel::<String>(100);
 
+    let module = key_gen::gen_random_prime().await;
+
     let state = AppState {
         config: match Config::load(&cli.config_path) {
             Ok(config) => config,
@@ -46,6 +69,13 @@ async fn main() {
                 std::process::exit(1);
             }
         },
+        q: module.clone(),
+        g: key_gen::random_biguint_mod(&module).await,
+        h: key_gen::random_biguint_mod(&module).await,
+        secret_key: Key::new(
+            key_gen::random_biguint_mod(&module).await,
+            key_gen::random_biguint_mod(&module).await,
+        ),
         tx,
     };
 

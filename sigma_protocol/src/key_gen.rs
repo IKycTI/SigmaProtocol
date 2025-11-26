@@ -5,38 +5,8 @@ use crate::math;
 
 const RANDOM_SIZE: u64 = 64;
 
-// pub fn generate_key() -> PairKey {
-//     let p = gen_random_prime();
-//     let mut q = gen_random_prime();
-
-//     if p == q {
-//         q = gen_random_prime();
-//     }
-
-//     let phi = (&p - BigUint::one()) * (&q - BigUint::one());
-
-//     let mut num = BigUint::from_u8(2).unwrap();
-//     let e = loop {
-//         if math::gcd_big(&num, &phi) == BigUint::one() {
-//             break num;
-//         } else {
-//             num += BigUint::one();
-//         }
-//     };
-//     let d = match math::modular_inverse_euclidean(&e, &phi) {
-//         Some(d) => d,
-//         None => panic!("Failed to find modular inverse"),
-//     };
-//     let n = p * q;
-//     let private_key = Key::new(n.clone(), d);
-
-//     let public_key = Key::new(n, e);
-
-//     PairKey::new(private_key, public_key)
-// }
-
 //Генерация случайного простого числа
-pub fn gen_random_prime() -> BigUint {
+pub async fn gen_random_prime() -> BigUint {
     let mut rng = rand::thread_rng();
     let mut res = rng.gen_biguint(RANDOM_SIZE);
     if &res % BigUint::from_u8(2).unwrap() == BigUint::zero() {
@@ -48,6 +18,13 @@ pub fn gen_random_prime() -> BigUint {
     }
     res.to_biguint().unwrap()
 }
+
+pub async fn random_biguint_mod(module: &BigUint) -> BigUint {
+    let mut rng = rand::thread_rng();
+    rng.gen_biguint(RANDOM_SIZE) % module
+}
+
+// pub async fn
 
 fn is_prime_miller_rabin(n: &BigUint, k: u8) -> bool {
     if n <= &BigUint::one() {
