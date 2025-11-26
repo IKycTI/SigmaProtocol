@@ -70,7 +70,13 @@ async fn main() {
             }
         },
         q: module.clone(),
-        g: key_gen::random_biguint_mod(&module).await,
+        g: match key_gen::generated_element(&module).await {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("Failed to generate element: {}", e);
+                std::process::exit(1);
+            }
+        },
         h: key_gen::random_biguint_mod(&module).await,
         secret_key: Key::new(
             key_gen::random_biguint_mod(&module).await,

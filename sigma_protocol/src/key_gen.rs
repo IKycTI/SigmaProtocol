@@ -1,5 +1,6 @@
 use num_bigint::{BigInt, BigUint, RandBigInt, ToBigInt, ToBigUint};
 use num_traits::{FromPrimitive, One, Zero};
+use tokio::time::error::Elapsed;
 
 use crate::math;
 
@@ -24,7 +25,20 @@ pub async fn random_biguint_mod(module: &BigUint) -> BigUint {
     rng.gen_biguint(RANDOM_SIZE) % module
 }
 
-// pub async fn
+pub async fn generated_element(module: &BigUint) -> Result<BigUint, String> {
+    loop {
+        let mut rng = rand::thread_rng();
+        let element = rng.gen_biguint(RANDOM_SIZE);
+        let res = match math::mod_pow_big(&element, &BigInt::from_u8(2).unwrap(), module) {
+            Some(result) => result,
+            None => return Err("Error in mod_pow_big".to_string()),
+        };
+        if res == BigUint::one() {
+            continue;
+        }
+        return Ok(res);
+    }
+}
 
 fn is_prime_miller_rabin(n: &BigUint, k: u8) -> bool {
     if n <= &BigUint::one() {
