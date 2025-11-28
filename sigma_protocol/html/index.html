@@ -89,34 +89,62 @@
             }
 
             function startProcess() {
+                // Защита от повторного нажатия
+                if (startBtn.disabled) return;
+
                 startBtn.disabled = true;
-                logOutput.value = ""; // очищаем логи
-                appendLog("Отправка запроса на запуск...");
+                logOutput.value = "";
+                appendLog("Подключение к потоку логов...");
 
-                // 1. Отправляем POST /start
-                fetch("/start", { method: "POST" })
-                    .then((response) => {
-                        if (!response.ok) throw new Error("Запуск не удался");
-                        appendLog("✅ Задача запущена. Ожидание логов...");
+                // 1. Сначала открываем SSE — до отправки /start!
+                if (eventSource) eventSource.close();
+                eventSource = new EventSource("/logs");
 
-                        // 2. Подключаемся к SSE-потоку
-                        if (eventSource) eventSource.close();
-                        eventSource = new EventSource("/logs");
+                eventSource.onopen = () => {
+                    appendLog("Подключено. Запускаем процесс идентификации...");
+                    // 2. Только теперь — POST /start
+                    fetch("/start", { method: "POST" })
+                        .then((response) => {
+                            if (!response.ok)
+                                throw new Error(`HTTP ${response.status}`);
+                        })
+                        .catch((err) => {
+                            appendLog(`Ошибка запуска: ${err.message}`);
+                            cleanup();
+                        });
+                };
 
-                        eventSource.onmessage = (e) => {
-                            appendLog(e.data);
-                        };
+                eventSource.onmessage = (e) => {
+                    const msg = e.data.trim();
+                    appendLog(msg);
 
-                        eventSource.onerror = (err) => {
-                            appendLog("❌ Ошибка подключения к логам");
-                            eventSource.close();
-                            startBtn.disabled = false;
-                        };
-                    })
-                    .catch((err) => {
-                        appendLog(`❌ Ошибка: ${err.message}`);
-                        startBtn.disabled = false;
-                    });
+                    if (
+                        msg.includes("В доступе отказано!") ||
+                        msg.includes("Доступ разрешен!")
+                    ) {
+                        setTimeout(cleanup, 500); // небольшая задержка для отображения
+                    }
+                };
+
+                eventSource.onerror = (err) => {
+                    appendLog("❌ Ошибка SSE: соединение потеряно");
+                    cleanup();
+                };
+
+                // Автоматическое включение кнопки через таймаут (на случай, если сервер не прислал "🔚")
+                const fallbackTimeout = setTimeout(() => {
+                    appendLog("⚠️ Таймаут ожидания завершения");
+                    cleanup();
+                }, 30_000); // 30 секунд
+
+                function cleanup() {
+                    if (eventSource) {
+                        eventSource.close();
+                        eventSource = null;
+                    }
+                    clearTimeout(fallbackTimeout);
+                    startBtn.disabled = false;
+                }
             }
 
             startBtn.addEventListener("click", startProcess);
