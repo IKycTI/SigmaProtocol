@@ -15,29 +15,13 @@ pub struct Address {
 }
 
 impl Config {
-    // pub fn new(ip: String, port: String) -> Self {
-    //     Config {
-    //         ip: Some(ip),
-    //         port: Some(port),
-    //     }
-    // }
-
     pub fn load(path: &str) -> Result<Self, std::io::Error> {
         let json_content = fs::read_to_string(path)?;
         let config: Config = serde_json::from_str(&json_content)?;
         Ok(config)
     }
-
-    pub fn get_name(&self) -> String {
-        self.name.clone()
-    }
-
     pub fn get_address(&self) -> String {
         self.address.get()
-    }
-
-    pub fn get_second_server_address(&self) -> String {
-        self.second_server.get()
     }
 }
 
