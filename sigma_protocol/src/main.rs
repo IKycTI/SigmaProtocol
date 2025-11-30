@@ -7,11 +7,8 @@ use axum::{
     routing::{get, post},
 };
 use num_bigint::{BigInt, BigUint, ToBigInt};
-use std::{
-    io::Error,
-    net::{SocketAddr, ToSocketAddrs},
-};
-use tokio::sync::{broadcast, watch::error::SendError};
+use std::net::SocketAddr;
+use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::{BroadcastStream, errors::BroadcastStreamRecvError};
 use tracing::{info, warn};
@@ -25,6 +22,14 @@ mod math;
 
 use config::Config;
 
+const Q: u8 = 11;
+const G: u8 = 2;
+const H: u8 = 3;
+const C: u8 = 4;
+const K1: u8 = 5;
+const K2: u8 = 2;
+const T1: u8 = 3;
+const T2: u8 = 7;
 // const PATH: &str = "config_p.json";
 
 #[derive(Parser)]
@@ -59,29 +64,34 @@ impl AppState {
 
         let state = AppState {
             config,
-            q: module.clone(),
-            g: match key_gen::generated_element(&module).await {
-                Ok(g) => g,
-                Err(e) => {
-                    eprintln!("Failed to generate element: {}", e);
-                    std::process::exit(1);
-                }
-            },
-            h: match key_gen::generated_element(&module).await {
-                Ok(h) => h,
-                Err(e) => {
-                    eprintln!("Failed to generate element: {}", e);
-                    std::process::exit(1);
-                }
-            },
+            q: BigUint::from(Q), //module.clone(),
+            g: BigUint::from(G),
+            // match key_gen::generated_element(&module).await {
+            //     Ok(g) => g,
+            //     Err(e) => {
+            //         eprintln!("Failed to generate element: {}", e);
+            //         std::process::exit(1);
+            //     }
+            // },
+            h: BigUint::from(H),
+            // match key_gen::generated_element(&module).await {
+            //     Ok(h) => h,
+            //     Err(e) => {
+            //         eprintln!("Failed to generate element: {}", e);
+            //         std::process::exit(1);
+            //     }
+            // },
             tx,
         };
         state
     }
 
     async fn get_challenge(&self) -> BigUint {
-        let c = key_gen::random_biguint_mod(&self.q).await;
-        let _ = self.tx.send(format!("Hello I`m Victor. {}", c));
+        let c = BigUint::from(C); //key_gen::random_biguint_mod(&self.q).await;
+        let _ = self.tx.send(format!(
+            "Виктор: Привет, я Виктор. Докажи что ты знаешь секретный ключ, твое испытание: {}",
+            c
+        ));
         tokio::time::sleep(Duration::from_millis(500)).await;
         info!("V сгенерировал с");
         c
@@ -182,6 +192,8 @@ async fn start_proof(appstate: AppState, tx: broadcast::Sender<String>) {
     let q = &appstate.q;
 
     let secret_key = Key::new(
+        // BigUint::from(K1),
+        // BigUint::from(K2),
         key_gen::random_biguint_mod(&q).await,
         key_gen::random_biguint_mod(&q).await,
     );
@@ -189,29 +201,51 @@ async fn start_proof(appstate: AppState, tx: broadcast::Sender<String>) {
     let u = compute_u(&secret_key, &appstate.g, &appstate.h, &appstate.q).await;
 
     info!("P Вычислил публичный ключ");
-    let _ = tx.send(format!(
-        "Hi, I'm Pavel! And I know the secret key! here is my public key: {} \n secret key ({}, {})",
-        u, secret_key.alpha, secret_key.beta
-    ))
-    .inspect_err(|e| warn!("Error log stream: {}", e));
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
 
     let g = &appstate.g;
     let h = &appstate.h;
 
+    let _ = tx
+        .send(format!(
+            "Сервер: Правила сервера: \n\t q = {} \n\t g = {} \n\t h = {}",
+            q, g, h
+        ))
+        .inspect_err(|e| warn!("Error log stream: {}", e));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
     let keyt = Key::new(
+        // BigUint::from(T1),
+        // BigUint::from(T2),
         key_gen::random_biguint_mod(&q).await,
         key_gen::random_biguint_mod(&q).await,
     );
 
     info!("P Сгенерировал альфа_t и бета_t");
     let ut = compute_u(&keyt, g, h, q).await;
+    let _ = tx.send(format!(
+        "Павел: Привет, я Павел! И я знаю секретный ключ! \n\t Вот мой публичный ключ(u): {} \n\t И дополнительный ключ для доказательства (u_t): {}",
+        u, ut
+    )).inspect_err(|e| warn!("Error log stream: {}", e));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let _ = tx
+        .send(format!(
+            "Сервер: Виктор не получит следующее сообщение: \n\t Секретный ключ Павла: ({}, {})",
+            secret_key.alpha, secret_key.beta
+        ))
+        .inspect_err(|e| warn!("Error log stream: {}", e));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let _ = tx
+        .send(format!(
+            "Сервер: Виктор не получит следующее сообщение: \n\t Дополнительный ключ: ({}, {})",
+            keyt.alpha, keyt.beta
+        ))
+        .inspect_err(|e| warn!("Error log stream: {}", e));
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     info!("P Вычислил u_t");
     let c = appstate.get_challenge().await;
 
-    info!("P Получили испытание!");
+    info!("P Получил испытание!");
 
     let keyz = Key::new(
         (keyt.alpha + secret_key.alpha * &c) % q,
@@ -221,7 +255,10 @@ async fn start_proof(appstate: AppState, tx: broadcast::Sender<String>) {
     info!("P Вычислил альфа_z и бета_z");
 
     let _ = tx
-        .send("P успешно вычислил и отправил значения az, bz, ut".to_string())
+        .send(format!(
+            "Павел: Я успешно вычислил \n\t a_z = {} \n\t b_z = {}",
+            keyz.alpha, keyz.beta
+        ))
         .inspect_err(|e| warn!("Error log stream: {}", e));
     tokio::time::sleep(Duration::from_millis(500)).await;
     send_proof(keyz, u, ut, c.to_bigint().unwrap(), appstate.clone(), tx).await;
@@ -236,8 +273,12 @@ async fn send_proof(
     tx: broadcast::Sender<String>,
 ) {
     let uz = compute_u(&key, &appstate.g, &appstate.h, &appstate.q).await;
-
     info!("V вычислил u_z");
+    let _ = tx
+        .send(format!("Виктор: Я успешно вычислил u_z = {}", uz))
+        .inspect_err(|e| warn!("Error log stream: {}", e));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
     let uc = match math::mod_pow_big(&u, &c, &appstate.q) {
         Some(u) => u,
         None => {
@@ -247,17 +288,34 @@ async fn send_proof(
             return;
         }
     };
+    let _ = tx
+        .send(format!("Виктор: Я успешно вычислил u^c = {}", uc))
+        .inspect_err(|e| warn!("Error log stream: {}", e));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
     let utuc = ut * uc % &appstate.q;
-    info!("V вычислил u_t * u^z");
+    info!("V вычислил u_t * u^c");
+
+    let _ = tx
+        .send(format!("Виктор: Я успешно вычислил u_t * u^c = {}", utuc))
+        .inspect_err(|e| warn!("Error log stream: {}", e));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
     if uz == utuc {
         info!("V подтверлил знание");
         let _ = tx
-            .send("Доступ разрешен!".to_string())
+            .send(format!(
+                "Виктор: {} = {} \n\t Павел, вы знаете секретный ключ!",
+                uz, utuc
+            ))
             .inspect_err(|e| warn!("Error log stream: {}", e));
     } else {
         info!("V отверг знание");
         let _ = tx
-            .send("В доступе отказано!".to_string())
+            .send(format!(
+                "Виктор: {} != {} \n\t Павел, вы не знаете секретный ключ!",
+                uz, utuc
+            ))
             .inspect_err(|e| warn!("Error log stream: {}", e));
     }
 }
